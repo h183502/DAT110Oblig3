@@ -3,6 +3,7 @@ package no.hvl.dat110.mutexprocess;
 import java.io.File;
 import java.io.IOException;
 import java.rmi.AccessException;
+import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.ArrayList;
@@ -83,7 +84,7 @@ public class MutexProcess extends UnicastRemoteObject implements ProcessInterfac
 		
 		// release your lock variables and logical clock update
 		CS_BUSY = false;
-		incrementclock();
+		WANTS_TO_ENTER_CS = false;
 	}
 	
 	public boolean requestWriteOperation(Message message) throws RemoteException {
@@ -97,7 +98,7 @@ public class MutexProcess extends UnicastRemoteObject implements ProcessInterfac
 		// multicast read request to start the voting to N/2 + 1 replicas (majority) - optimal. You could as well send to all the replicas that have the file
 		
 		
-		return false;		// change to the election result
+		return multicastMessage(message, quorum);		// change to the election result
 	}
 	
 	public boolean requestReadOperation(Message message) throws RemoteException {
@@ -111,7 +112,7 @@ public class MutexProcess extends UnicastRemoteObject implements ProcessInterfac
 		// multicast read request to start the voting to N/2 + 1 replicas (majority) - optimal. You could as well send to all the replicas that have the file
 		
 		
-		return false;  // change to the election result
+		return multicastMessage(message, quorum);  // change to the election result
 	}
 	
 	// multicast message to N/2 + 1 processes (random processes)
@@ -126,17 +127,29 @@ public class MutexProcess extends UnicastRemoteObject implements ProcessInterfac
 		
 		// multicast message to N/2 + 1 processes (random processes) - block until feedback is received
 
-		for (int i = 0; i < n; i++){
-			String stub = replicas.get(i);
+
+		synchronized (queueACK){
+			for (int i = 0; i < n; i++){
+				String stub = replicas.get(i);
+				try {
+					ProcessInterface process = Util.registryHandle(stub);
+					queueACK.add(process.onMessageReceived(message));
+				} catch (NotBoundException e) {
+					e.printStackTrace();
+				}
+			}
 
 		}
+
+		return majorityAcknowledged();
+
 
 		// do something with the acknowledgement you received from the voters - Idea: use the queueACK to collect GRANT/DENY messages and make sure queueACK is synchronized!!!
 		
 		// compute election result - Idea call majorityAcknowledged()
 		
 		
-		return false;  // change to the election result			
+		// change to the election result
 
 	}
 	
@@ -152,14 +165,12 @@ public class MutexProcess extends UnicastRemoteObject implements ProcessInterfac
 		 *  case 1: Receiver is not accessing shared resource and does not want to: GRANT, acquirelock and reply
 		 */
 		if (!CS_BUSY && !WANTS_TO_ENTER_CS){
-			Message reply = new Message();
-			message.setClock(this.counter);
-			message.setProcessStubName(this.procStubname);
+
 			message.setAcknowledged(true);
 
 			acquireLock();
 
-			return reply;
+			return message;
 		}
 		
 		
@@ -168,12 +179,10 @@ public class MutexProcess extends UnicastRemoteObject implements ProcessInterfac
 		 */
 
 		if (CS_BUSY){
-			Message reply = new Message();
-			message.setClock(this.counter);
-			message.setProcessStubName(this.procStubname);
+
 			message.setAcknowledged(false);
 
-			return reply;
+			return message;
 		}
 		
 		/**
@@ -182,20 +191,18 @@ public class MutexProcess extends UnicastRemoteObject implements ProcessInterfac
 		 */
 
 		if (WANTS_TO_ENTER_CS){
-			Message reply = new Message();
-			message.setClock(this.counter);
-			message.setProcessStubName(this.procStubname);
 
-			if (reply.getClock() < message.getClock()){
-				message.setAcknowledged(false);
 
-				return reply;
-			}else {
+			if (message.getClock() < this.counter){
 				message.setAcknowledged(true);
+
+				return message;
+			}else {
+				message.setAcknowledged(false);
 
 				acquireLock();
 
-				return reply;
+				return message;
 			}
 		}
 		
@@ -245,12 +252,30 @@ public class MutexProcess extends UnicastRemoteObject implements ProcessInterfac
 		// check the operation type:
 		// if this is a write operation, multicast the update to the rest of the replicas (voters)
 		// otherwise if this is a READ operation multicast releaselocks to the replicas (voters)
+
+		Operations operations = new Operations(this, message);
+
+		if (message.getOptype() == OperationType.WRITE){
+			operations.multicastOperationToReplicas(message);
+		}else {
+			operations.multicastReadReleaseLocks();
+		}
 	}	
 	
 	@Override
 	public void multicastVotersDecision(Message message) throws RemoteException {	
 		// multicast voters decision to the rest of the replicas
-		multicastMessage(message, N -1);
+
+		for (int i = 0; i < replicas.size(); i++){
+			String stub = replicas.get(i);
+			try {
+				ProcessInterface process = Util.registryHandle(stub);
+				process.onReceivedUpdateOperation(message);
+			}catch (NotBoundException e){
+				e.printStackTrace();
+			}
+		}
+
 
 	}
 
