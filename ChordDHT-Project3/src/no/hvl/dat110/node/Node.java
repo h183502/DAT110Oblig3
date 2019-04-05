@@ -457,16 +457,20 @@ public class Node extends UnicastRemoteObject implements ChordNodeInterface {
 		
 		// multicast voters decision to the rest of the replicas (i.e activenodesforfile)
 
-		for (int i = 0; i < activenodesforfile.size(); i++){
-			ChordNodeInterface stub = fingerTable.get(i);
+		ArrayList<Message> replicas = new ArrayList<Message>(activenodesforfile);
+
+		for (Message activenodes : replicas){
+
+			String nodeip = activenodes.getNodeIP();
+			String nodeid = activenodes.getNodeID().toString();
+
 			try {
-				ChordNodeInterface chordNodeInterface = Util.registryHandle(stub);
-				chordNodeInterface.onReceivedUpdateOperation(message);
-			}catch (RemoteException e){
+				Registry registry = Util.locateRegistry(nodeip);
+				ChordNodeInterface node = (ChordNodeInterface) registry.lookup(nodeid);
+			}catch (NotBoundException e){
 				e.printStackTrace();
-
-
 			}
+
 
 		}
 

@@ -130,28 +130,27 @@ public class FileManager extends Thread {
 
 		Message nodeMsg = new ArrayList<>(activeNodes).get(0);
 
-		ChordNodeInterface node = (ChordNodeInterface) Util.locateRegistry(nodeMsg.getNodeIP()).lookup(nodeMsg.getNodeIP().toString());
+		ChordNodeInterface node = (ChordNodeInterface) Util.locateRegistry(nodeMsg.getNodeIP()).lookup(nodeMsg.getNodeID().toString());
 
 		Message msg = nodeMsg;
 		msg.setOptype(OperationType.READ);
 
 		node.setActiveNodesForFile(activeNodes);
-		chordnode.setActiveNodesForFile(activeNodes);
 
-		msg.setNodeID(chordnode.getNodeID());
+		msg.setNodeID(node.getNodeID());
 
-		boolean result = chordnode.requestReadOperation(msg);
+		boolean result = node.requestReadOperation(msg);
 
 		msg.setAcknowledged(result);
 
-		chordnode.multicastVotersDecision(msg);
+		node.multicastVotersDecision(msg);
 
 		if (msg.isAcknowledged()){
-			chordnode.acquireLock();
-			Operations operations = new Operations(chordnode, msg, activeNodes);
+			node.acquireLock();
+			Operations operations = new Operations(node, msg, activeNodes);
 			operations.performOperation();
 			operations.multicastReadReleaseLocks();
-			chordnode.releaseLocks();
+			node.releaseLocks();
 		}
 		
 		// get all the activenodes that have the file (replicas) i.e. requestActiveNodesForFile(String filename)
@@ -197,7 +196,7 @@ public class FileManager extends Thread {
 
 		Message nodeMsg = new ArrayList<>(activeNodes).get(0);
 
-		ChordNodeInterface node = (ChordNodeInterface) Util.locateRegistry(nodeMsg.getNodeIP()).lookup(nodeMsg.getNodeIP().toString());
+		ChordNodeInterface node = (ChordNodeInterface) Util.locateRegistry(nodeMsg.getNodeIP()).lookup(nodeMsg.getNodeIP());
 
 		Message msg = nodeMsg;
 		msg.setOptype(OperationType.WRITE);
@@ -205,18 +204,18 @@ public class FileManager extends Thread {
 
 		node.setActiveNodesForFile(activeNodes);
 
-		msg.setNodeIP(chordnode.getNodeIP());
+		msg.setNodeIP(node.getNodeIP());
 
-		boolean result = chordnode.requestWriteOperation(msg);
+		boolean result = node.requestWriteOperation(msg);
 
 		msg.setAcknowledged(result);
 
-		chordnode.multicastVotersDecision(msg);
+		node.multicastVotersDecision(msg);
 
 		if (msg.isAcknowledged()){
-			chordnode.acquireLock();
+			node.acquireLock();
 
-			Operations operations = new Operations(chordnode, msg, activeNodes);
+			Operations operations = new Operations(node, msg, activeNodes);
 			operations.performOperation();
 
 			try {
@@ -225,7 +224,7 @@ public class FileManager extends Thread {
 				e.printStackTrace();
 			}
 			operations.multicastReadReleaseLocks();
-			chordnode.releaseLocks();
+			node.releaseLocks();
 		}
 		// get all the activenodes that have the file (replicas) i.e. requestActiveNodesForFile(String filename)
 		
