@@ -90,6 +90,20 @@ public class FileManager extends Thread {
 		// generate the N replica keyids from the filename
 		
 		// create replicas
+		createReplicaFiles(filename);
+
+		Set<Message> messages = new HashSet<>();
+
+		for (BigInteger keyId : replicafiles){
+			ChordNodeInterface node = chordnode.findSuccessor(keyId);
+			if (node != null){
+				Message msg = node.getFilesMetadata().get(keyId);
+
+				if (msg != null && !checkDuplicateActiveNode(messages, msg)){
+					messages.add(msg);
+				}
+			}
+		}
 		
 		// findsuccessors for each file replica and save the result (fileID) for each successor 
 		
@@ -97,7 +111,7 @@ public class FileManager extends Thread {
 		
 		// save the message in a list but eliminate duplicated entries. e.g a node may be repeated because it maps more than one replicas to its id. (use checkDuplicateActiveNode)
 		
-		return null;	// return value is a Set of type Message		
+		return messages;	// return value is a Set of type Message
 	}
 	
 	private boolean checkDuplicateActiveNode(Set<Message> activenodesdata, Message nodetocheck) {
@@ -111,6 +125,34 @@ public class FileManager extends Thread {
 	}
 	
 	public boolean requestToReadFileFromAnyActiveNode(String filename) throws RemoteException, NotBoundException {
+
+		Set<Message> activeNodes = requestActiveNodesForFile(filename);
+
+		Message nodeMsg = new ArrayList<>(activeNodes).get(0);
+
+		ChordNodeInterface node = (ChordNodeInterface) Util.locateRegistry(nodeMsg.getNodeIP()).lookup(nodeMsg.getNodeIP().toString());
+
+		Message msg = nodeMsg;
+		msg.setOptype(OperationType.READ);
+
+		node.setActiveNodesForFile(activeNodes);
+		chordnode.setActiveNodesForFile(activeNodes);
+
+		msg.setNodeID(chordnode.getNodeID());
+
+		boolean result = chordnode.requestReadOperation(msg);
+
+		msg.setAcknowledged(result);
+
+		chordnode.multicastVotersDecision(msg);
+
+		if (msg.isAcknowledged()){
+			chordnode.acquireLock();
+			Operations operations = new Operations(chordnode, msg, activeNodes);
+			operations.performOperation();
+			operations.multicastReadReleaseLocks();
+			chordnode.releaseLocks();
+		}
 		
 		// get all the activenodes that have the file (replicas) i.e. requestActiveNodesForFile(String filename)
 			
@@ -145,11 +187,46 @@ public class FileManager extends Thread {
 		
 			
 			
-		return false;		// change to your final answer
+		return msg.isAcknowledged();		// change to your final answer
 	}
 	
 	public boolean requestWriteToFileFromAnyActiveNode(String filename, String newcontent) throws RemoteException, NotBoundException {
-		
+
+
+		Set<Message> activeNodes = requestActiveNodesForFile(filename);
+
+		Message nodeMsg = new ArrayList<>(activeNodes).get(0);
+
+		ChordNodeInterface node = (ChordNodeInterface) Util.locateRegistry(nodeMsg.getNodeIP()).lookup(nodeMsg.getNodeIP().toString());
+
+		Message msg = nodeMsg;
+		msg.setOptype(OperationType.WRITE);
+		msg.setNewcontent(newcontent);
+
+		node.setActiveNodesForFile(activeNodes);
+
+		msg.setNodeIP(chordnode.getNodeIP());
+
+		boolean result = chordnode.requestWriteOperation(msg);
+
+		msg.setAcknowledged(result);
+
+		chordnode.multicastVotersDecision(msg);
+
+		if (msg.isAcknowledged()){
+			chordnode.acquireLock();
+
+			Operations operations = new Operations(chordnode, msg, activeNodes);
+			operations.performOperation();
+
+			try {
+				distributeReplicaFiles();
+			}catch (IOException e){
+				e.printStackTrace();
+			}
+			operations.multicastReadReleaseLocks();
+			chordnode.releaseLocks();
+		}
 		// get all the activenodes that have the file (replicas) i.e. requestActiveNodesForFile(String filename)
 		
 		// choose any available node
@@ -179,13 +256,13 @@ public class FileManager extends Thread {
 		
 		// release locks after operations
 		
-		return false;  // change to your final answer
+		return msg.isAcknowledged();  // change to your final answer
 
 	}
 
 	/**
 	 * create the localfile with the node's name and id as content of the file
-	 * @param nodename
+	 *
 	 * @throws RemoteException 
 	 */
 	public void createLocalFile() throws RemoteException {
